@@ -9,7 +9,7 @@ import 'element-plus/dist/index.css'
 import zhCn from 'element-plus/dist/locale/zh-cn.mjs'
 
 const app = createApp(App)
-app.use(ElementPlus, { locale: zhCn})
+app.use(ElementPlus, { locale: zhCn })
 
 //svg插件配置代码
 import 'virtual:svg-icons-register'
