@@ -37,6 +37,7 @@
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ref } from 'vue'
+import SparkMD5 from 'spark-md5'
 
 const beforeUpload = (file: File) => {
   if (file.size / 1024 / 1024 / 1024 > 1.5) {
@@ -73,14 +74,24 @@ const cancel = () => {
   // axios.post('cancelUpload', { folder: fileData.value.md5 })
 }
 
-let counter = 0
-const getFileMd5 = () => {
-  let guid = (+new Date()).toString(32)
-  for (let i = 0; i < 5; i++) {
-    guid += Math.floor(Math.random() * 65535).toString(32)
+const calc_checksum = (file: any, chunk_size: any) => {
+  if (chunk_size === null) {
+    return new Promise((resolve, reject) => {
+      const spark = new SparkMD5.ArrayBuffer()
+      const fileReader = new FileReader()
+      fileReader.onload = (e): void => {
+        spark.append(e.target?.result)
+        resolve(spark.end())
+      }
+      fileReader.onerror = () => {
+        reject('')
+      }
+      fileReader.readAsArrayBuffer(file)
+    })
   }
-  return 'wu_' + guid + (counter++).toString(32)
 }
+
+let counter = 0
 
 const updateUrl = (fileUrl: string) => {
   axios.post('saveUrl', {
@@ -93,27 +104,29 @@ const uploadChunkFile = async (i: number, fileObj: File) => {
   const start = i * chunkSize // 切片开始位置
   const end = Math.min(fileData.value.size, start + chunkSize) // 切片结束位置
   const chunkFile = fileObj.slice(start, end) // 切片文件
+  const chunkCheckSum = (await calc_checksum(chunkFile, null)) as string
   const formData = new FormData() // formData 参数需要与后端对齐
-  formData.append('fileName', fileData.value.name)
-  formData.append('folder', fileData.value.md5)
-  formData.append('file', chunkFile, String(i + 1)) // 必传字段；若第三个参数不传，切片 filename 默认是 blob ，如果后端是以切片名称来做合并的，则第三个参数一定要传
+  formData.append('chunk', chunkFile)
+  formData.append('file_identifier', file_identifier.value)
+  formData.append('number', i)
+  formData.append('checksum', chunkCheckSum)
+  // formData.append('file', chunkFile, String(i + 1)) // 必传字段；若第三个参数不传，切片 filename 默认是 blob ，如果后端是以切片名称来做合并的，则第三个参数一定要传
   controller = new AbortController() // 每一次上传切片都要新生成一个 AbortController ，否则重新上传会失败
-  return await axios
-    .post(url + '/upload_chunk', formData, {
-      // 调用后端上传切片接口
-      onUploadProgress: (data) => {
-        // 进度条展示
-        percentage.value = Number(
-          (
-            (Math.min(fileData.value.size, start + data.loaded) /
-              fileData.value.size) *
-            100
-          ).toFixed(2),
-        )
-      },
-      signal: controller.signal, // 取消上传
-    })
-    .then((res) => updateUrl(res.data))
+  return await axios.post(url + '/upload_chunk', formData, {
+    // 调用后端上传切片接口
+    onUploadProgress: (data) => {
+      // 进度条展示
+      percentage.value = Number(
+        (
+          (Math.min(fileData.value.size, start + data.loaded) /
+            fileData.value.size) *
+          100
+        ).toFixed(2),
+      )
+    },
+    signal: controller.signal, // 取消上传
+  })
+  // .then((res) => updateUrl(res.data))
 }
 
 const batchUpload = async (fileObj: File) => {
@@ -121,34 +134,66 @@ const batchUpload = async (fileObj: File) => {
   dialogVisible.value = true // 显示上传进度
   cancelUpload.value = false // 每次上传文件前将取消上传标识置为 false
   const chunkCount = Math.ceil(fileData.value.size / chunkSize) // 切片数量
-  fileData.value.md5 = getFileMd5() // 文件唯一标识
+
   for (let i = 0; i < chunkCount; i++) {
-    if (cancelUpload.value) return // 若已经取消上传，则不再上传切片
     const res = await uploadChunkFile(i, fileObj) // 上传切片
-    if (res.code !== 0) {
-      // 切片上传失败
-      dialogVisible.value = false
-      ElMessageBox({ message: `${fileData.value.name}上传失败`, title: '提示' })
-      return
-    }
+    console.log(res.data)
+    // if (res.code !== 0) {
+    //   // 切片上传失败
+    //   dialogVisible.value = false
+    //   ElMessageBox({ message: `${fileData.value.name}上传失败`, title: '提示' })
+    //   return
+    // }
     if (i === chunkCount - 1) {
       // 最后一片切片上传成功
       setTimeout(() => {
         // 延迟关闭上传进度框用户体验会更好
         dialogVisible.value = false
-        ElMessageBox({
-          message: `${fileData.value.name}上传成功`,
-          title: '提示',
-        })
         axios
-          .post('mergeUpload', { folder: fileData.value.md5 }) // 调用后端合并切片接口，参数需要与后端对齐
-          .then((res) => updateUrl(res.data)) // 调用后端保存上传文件路径接口
+          .put(
+            url +
+              '/combine_chunks/' +
+              file_identifier.value +
+              '/' +
+              file_checksum.value,
+          ) // 调用后端合并切片接口，参数需要与后端对齐
+          .then((res) => {
+            updateUrl(res.data)
+            ElMessageBox({
+              message: `${fileData.value.name}上传成功`,
+              title: '提示',
+            })
+          }) // 调用后端保存上传文件路径接口
       }, 500)
     }
   }
 }
 
+const uploadTest = async (fileObj: File) => {
+  const formData = new FormData()
+  const chunkFile = fileObj.slice(chunkSize, 2 * chunkSize) // 切片文件
+  const chunkCheckSum = (await calc_checksum(chunkFile, null)) as string
+  console.log(chunkCheckSum)
+  formData.append('chunk', chunkFile)
+  formData.append('file_identifier', file_identifier.value)
+  formData.append('number', 1)
+  formData.append('checksum', chunkCheckSum)
+  axios.post(url + '/upload_chunk', formData).then((res) => {
+    console.log(res.data)
+  })
+  // axios.post(url + '/upload', formData).then((res) => {
+  //   ElMessageBox({
+  //     message: `${fileData.value.name}上传成功`,
+  //     title: '提示',
+  //   })
+  //   updateUrl(res.data)
+  // })
+}
+
 const disabled = ref(false)
+const file_identifier = ref('')
+const remaining_chunks = ref([])
+const file_checksum = ref('')
 const upload = async (file: { file: File }) => {
   const fileObj = file.file
   const nameList = fileObj.name.split('.')
@@ -161,15 +206,13 @@ const upload = async (file: { file: File }) => {
   fileData.value.chunk_size = chunkSize
   fileData.value.secret = '4t76gjsdhcnoaweyfqw3849yfiuasdfn'
 
-  console.log(fileData.value)
-  axios.post(
-    url + '/create_upload_identifier',
-    fileData.value,
-  ).then((res) => {
-    console.log(res)
+  axios.post(url + '/create_upload_identifier', fileData.value).then((res) => {
+    file_identifier.value = res.data['data']['identifier']
+    remaining_chunks.value = res.data['data']['remaining_chunks']
+    console.log(res.data)
   })
-
-
+  file_checksum.value = (await calc_checksum(fileObj, null)) as string
+  // uploadTest(fileObj)
   // if (chunkSize > fileData.value.size) {
   //   // 文件大小小于切片大小，直接上传
   //   disabled.value = true
@@ -191,7 +234,7 @@ const upload = async (file: { file: File }) => {
   //     .finally(() => (disabled.value = false))
   //   return
   // }
-  // batchUpload(fileObj) // 大文件切片上传
+  batchUpload(fileObj) // 大文件切片上传
 }
 </script>
 
