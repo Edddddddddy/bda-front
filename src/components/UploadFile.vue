@@ -56,7 +56,7 @@ const url = 'http://bdap.cmu.edu.cn:30004'
 const dialogVisible = ref(false)
 const cancelUpload = ref(false)
 let controller: AbortController | null = null
-const chunkSize = 4 * 1024 * 1024 // 切片大小
+const CHUNK_SIZE = 4 * 1024 * 1024 // 切片大小
 let progress = ref(0)
 const percentage = ref(0)
 let source = null
@@ -223,8 +223,10 @@ const upload = async (file: { file: File }) => {
   fileData.value.path = '/'
   fileData.value.modify_time = '2024-05-03T14:03:50'
   fileData.value.size = fileObj.size
-  fileData.value.chunk_size = chunkSize
+  fileData.value.chunk_size = CHUNK_SIZE
   fileData.value.secret = '4t76gjsdhcnoaweyfqw3849yfiuasdfn'
+
+
 
   axios.post(url + '/create_upload_identifier', fileData.value).then((res) => {
     file_identifier.value = res.data['data']['identifier']
