@@ -26,6 +26,11 @@ defineProps({
   },
 })
 </script>
+<script lang="ts">
+export default {
+  name: 'SvgIcon',
+}
+</script>
 <template>
   <svg :style="{ width, height }">
     <use :xlink:href="prefix + name" :fill="color"></use>
